@@ -19,10 +19,10 @@ FROM ${NODE_IMAGE} AS frontend-builder
 
 WORKDIR /app/frontend
 
+RUN pnpm approve-builds --all
+
 # Install pnpm
 RUN corepack enable && corepack prepare pnpm@latest --activate
-
-RUN pnpm approve-builds --all
 
 # Install dependencies first (better caching)
 COPY frontend/package.json frontend/pnpm-lock.yaml ./
