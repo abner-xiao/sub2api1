@@ -1,3 +1,0 @@
-onlyBuiltDependencies:
-  - esbuild@0.21.5
-  - vue-demi@0.14.10
