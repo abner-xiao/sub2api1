@@ -25,7 +25,7 @@ RUN corepack enable && corepack prepare pnpm@latest --activate
 # Install dependencies first (better caching)
 COPY frontend/package.json frontend/pnpm-lock.yaml ./
 RUN pnpm --version
-RUN pnpm install --frozen-lockfile --verbose
+RUN pnpm install --frozen-lockfile --only-built-dependencies-file=false --verbose
 # Copy frontend source and build
 COPY frontend/ ./
 RUN pnpm run build
