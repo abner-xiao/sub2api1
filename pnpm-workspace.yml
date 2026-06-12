@@ -1,0 +1,9 @@
+packages:
+  - 'packages/*'
+
+# 单独指定允许构建的包
+onlyBuiltDependencies:
+  - esbuild
+  - vue-demi
+  - core-js
+  - '@parcel/watcher'
