@@ -753,13 +753,6 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 		return nil, err
 	}
 
-	// 设置认证头
-	if tokenType == "oauth" {
-		req.Header.Set("authorization", "Bearer "+token)
-	} else {
-		req.Header.Set("x-api-key", token)
-	}
-
 	// 白名单透传headers
 	for key, values := range c.Request.Header {
 		lowerKey := strings.ToLower(key)
@@ -768,6 +761,14 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 				req.Header.Add(key, v)
 			}
 		}
+	}
+
+	// 设置认证头。必须在白名单透传之后覆盖入站认证残留。
+	if tokenType == "oauth" {
+		deleteAnthropicAuthHeaders(req.Header)
+		req.Header.Set("authorization", "Bearer "+token)
+	} else {
+		setAnthropicAPIKeyAuthHeader(req.Header, account, token)
 	}
 
 	// OAuth账号：应用缓存的指纹到请求头（覆盖白名单透传的头）
@@ -1373,13 +1374,6 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 		return nil, err
 	}
 
-	// 设置认证头
-	if tokenType == "oauth" {
-		req.Header.Set("authorization", "Bearer "+token)
-	} else {
-		req.Header.Set("x-api-key", token)
-	}
-
 	// 白名单透传 headers
 	for key, values := range c.Request.Header {
 		lowerKey := strings.ToLower(key)
@@ -1388,6 +1382,14 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 				req.Header.Add(key, v)
 			}
 		}
+	}
+
+	// 设置认证头。必须在白名单透传之后覆盖入站认证残留。
+	if tokenType == "oauth" {
+		deleteAnthropicAuthHeaders(req.Header)
+		req.Header.Set("authorization", "Bearer "+token)
+	} else {
+		setAnthropicAPIKeyAuthHeader(req.Header, account, token)
 	}
 
 	// OAuth 账号：应用指纹到请求头

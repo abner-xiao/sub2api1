@@ -928,6 +928,8 @@ export default {
       apiKeyRequired: 'API Key *',
       apiKeyPlaceholder: 'sk-ant-api03-...',
       apiKeyHint: 'Your Claude Console API Key',
+      bearerToken: 'Bearer Token',
+      bearerTokenDesc: 'When checked, pass the API key as Authorization: Bearer. Otherwise keep x-api-key.',
       // OpenAI specific hints
       openai: {
         baseUrlHint: 'Leave default for official OpenAI API',

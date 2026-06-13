@@ -252,6 +252,24 @@
             </div>
           </button>
         </div>
+        <label
+          v-if="accountCategory === 'apikey'"
+          class="mt-3 flex cursor-pointer items-start gap-3 rounded-lg border border-gray-200 p-3 transition-colors hover:bg-gray-50 dark:border-dark-600 dark:hover:bg-dark-700"
+        >
+          <input
+            v-model="anthropicBearerTokenEnabled"
+            type="checkbox"
+            class="mt-0.5 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500"
+          />
+          <span>
+            <span class="block text-sm font-medium text-gray-900 dark:text-white">
+              {{ t('admin.accounts.bearerToken') }}
+            </span>
+            <span class="block text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.bearerTokenDesc') }}
+            </span>
+          </span>
+        </label>
       </div>
 
       <!-- Account Type Selection (OpenAI) -->
@@ -1298,6 +1316,7 @@ const customErrorCodesEnabled = ref(false)
 const selectedErrorCodes = ref<number[]>([])
 const customErrorCodeInput = ref<number | null>(null)
 const interceptWarmupRequests = ref(false)
+const anthropicBearerTokenEnabled = ref(false)
 const mixedScheduling = ref(false) // For antigravity accounts: enable mixed scheduling
 const geminiOAuthType = ref<'code_assist' | 'ai_studio'>('code_assist')
 const geminiAIStudioOAuthEnabled = ref(false)
@@ -1480,6 +1499,7 @@ const form = reactive({
   platform: 'anthropic' as AccountPlatform,
   type: 'oauth' as AccountType, // Will be 'oauth', 'setup-token', or 'apikey'
   credentials: {} as Record<string, unknown>,
+  extra: undefined as Record<string, unknown> | undefined,
   proxy_id: null as number | null,
   concurrency: 10,
   priority: 1,
@@ -1547,6 +1567,7 @@ watch(
     // Reset Anthropic-specific settings when switching to other platforms
     if (newPlatform !== 'anthropic') {
       interceptWarmupRequests.value = false
+      anthropicBearerTokenEnabled.value = false
     }
     // Antigravity only supports OAuth
     if (newPlatform === 'antigravity') {
@@ -1666,6 +1687,7 @@ const resetForm = () => {
   form.platform = 'anthropic'
   form.type = 'oauth'
   form.credentials = {}
+  form.extra = undefined
   form.proxy_id = null
   form.concurrency = 10
   form.priority = 1
@@ -1681,6 +1703,7 @@ const resetForm = () => {
   selectedErrorCodes.value = []
   customErrorCodeInput.value = null
   interceptWarmupRequests.value = false
+  anthropicBearerTokenEnabled.value = false
   geminiOAuthType.value = 'code_assist'
   oauth.resetState()
   openaiOAuth.resetState()
@@ -1742,6 +1765,10 @@ const handleSubmit = async () => {
   }
 
   form.credentials = credentials
+  form.extra =
+    form.platform === 'anthropic' && anthropicBearerTokenEnabled.value
+      ? { anthropic_auth_header: 'bearer' }
+      : undefined
 
   submitting.value = true
   try {

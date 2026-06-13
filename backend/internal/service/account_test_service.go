@@ -200,7 +200,7 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 			authToken = tokenInfo.AccessToken
 		}
 	} else if account.Type == "apikey" {
-		// API Key - use x-api-key header
+		// API Key - use the account-level Anthropic auth header mode.
 		useBearer = false
 		authToken = account.GetCredential("api_key")
 		if authToken == "" {
@@ -252,7 +252,7 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 	if useBearer {
 		req.Header.Set("Authorization", "Bearer "+authToken)
 	} else {
-		req.Header.Set("x-api-key", authToken)
+		setAnthropicAPIKeyAuthHeader(req.Header, account, authToken)
 	}
 
 	// Get proxy URL

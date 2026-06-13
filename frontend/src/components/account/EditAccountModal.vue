@@ -51,6 +51,25 @@
           <p class="input-hint">{{ t('admin.accounts.leaveEmptyToKeep') }}</p>
         </div>
 
+        <label
+          v-if="account.platform === 'anthropic'"
+          class="flex cursor-pointer items-start gap-3 rounded-lg border border-gray-200 p-3 transition-colors hover:bg-gray-50 dark:border-dark-600 dark:hover:bg-dark-700"
+        >
+          <input
+            v-model="anthropicBearerTokenEnabled"
+            type="checkbox"
+            class="mt-0.5 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500"
+          />
+          <span>
+            <span class="block text-sm font-medium text-gray-900 dark:text-white">
+              {{ t('admin.accounts.bearerToken') }}
+            </span>
+            <span class="block text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.bearerTokenDesc') }}
+            </span>
+          </span>
+        </label>
+
         <!-- Model Restriction Section (不适用于 Gemini) -->
         <div v-if="account.platform !== 'gemini'" class="border-t border-gray-200 pt-4 dark:border-dark-600">
           <label class="input-label">{{ t('admin.accounts.modelRestriction') }}</label>
@@ -608,6 +627,7 @@ const customErrorCodesEnabled = ref(false)
 const selectedErrorCodes = ref<number[]>([])
 const customErrorCodeInput = ref<number | null>(null)
 const interceptWarmupRequests = ref(false)
+const anthropicBearerTokenEnabled = ref(false)
 const mixedScheduling = ref(false) // For antigravity accounts: enable mixed scheduling
 
 // Common models for whitelist - Anthropic
@@ -823,6 +843,10 @@ watch(
       // Load mixed scheduling setting (only for antigravity accounts)
       const extra = newAccount.extra as Record<string, unknown> | undefined
       mixedScheduling.value = extra?.mixed_scheduling === true
+      anthropicBearerTokenEnabled.value =
+        newAccount.platform === 'anthropic' &&
+        newAccount.type === 'apikey' &&
+        extra?.anthropic_auth_header === 'bearer'
 
       // Initialize API Key fields for apikey type
       if (newAccount.type === 'apikey' && newAccount.credentials) {
@@ -1037,6 +1061,17 @@ const handleSubmit = async () => {
         newExtra.mixed_scheduling = true
       } else {
         delete newExtra.mixed_scheduling
+      }
+      updatePayload.extra = newExtra
+    }
+
+    if (props.account.platform === 'anthropic' && props.account.type === 'apikey') {
+      const currentExtra = (props.account.extra as Record<string, unknown>) || {}
+      const newExtra: Record<string, unknown> = { ...currentExtra }
+      if (anthropicBearerTokenEnabled.value) {
+        newExtra.anthropic_auth_header = 'bearer'
+      } else {
+        delete newExtra.anthropic_auth_header
       }
       updatePayload.extra = newExtra
     }
