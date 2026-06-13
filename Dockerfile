@@ -88,6 +88,8 @@ RUN addgroup -g 1000 sub2api && \
 # Set working directory
 WORKDIR /app
 
+COPY --from=deploy docker-compose.yml /app/sub2api/docker-compose.yaml
+
 # Copy binary from builder
 COPY --from=backend-builder /app/sub2api /app/sub2api
 
