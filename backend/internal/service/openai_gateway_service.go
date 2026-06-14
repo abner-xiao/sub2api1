@@ -29,6 +29,13 @@ const (
 	openaiStickySessionTTL = time.Hour // 粘性会话TTL
 )
 
+type openAIUpstreamMode string
+
+const (
+	openAIUpstreamModeResponses       openAIUpstreamMode = "responses"
+	openAIUpstreamModeChatCompletions openAIUpstreamMode = "chat_completions"
+)
+
 // openaiSSEDataRe matches SSE data lines with optional whitespace after colon.
 // Some upstream APIs return non-standard "data:" without space (should be "data: ").
 var openaiSSEDataRe = regexp.MustCompile(`^data:\s*`)
@@ -266,6 +273,8 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	reqModel, _ := reqBody["model"].(string)
 	reqStream, _ := reqBody["stream"].(bool)
 
+	upstreamMode := resolveOpenAIUpstreamMode(account)
+
 	// Track if body needs re-serialization
 	bodyModified := false
 	originalModel := reqModel
@@ -280,6 +289,15 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	// For OAuth accounts using ChatGPT internal API, add store: false
 	if account.Type == AccountTypeOAuth {
 		reqBody["store"] = false
+		bodyModified = true
+	}
+
+	if upstreamMode == openAIUpstreamModeChatCompletions {
+		chatBody, err := convertResponsesRequestToChatCompletions(reqBody)
+		if err != nil {
+			return nil, err
+		}
+		reqBody = chatBody
 		bodyModified = true
 	}
 
@@ -299,7 +317,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	}
 
 	// Build upstream request
-	upstreamReq, err := s.buildUpstreamRequest(ctx, c, account, body, token, reqStream)
+	upstreamReq, err := s.buildUpstreamRequest(ctx, c, account, body, token, reqStream, upstreamMode)
 	if err != nil {
 		return nil, err
 	}
@@ -330,14 +348,14 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	var usage *OpenAIUsage
 	var firstTokenMs *int
 	if reqStream {
-		streamResult, err := s.handleStreamingResponse(ctx, resp, c, account, startTime, originalModel, mappedModel)
+		streamResult, err := s.handleStreamingResponse(ctx, resp, c, account, startTime, originalModel, mappedModel, upstreamMode)
 		if err != nil {
 			return nil, err
 		}
 		usage = streamResult.usage
 		firstTokenMs = streamResult.firstTokenMs
 	} else {
-		usage, err = s.handleNonStreamingResponse(ctx, resp, c, account, originalModel, mappedModel)
+		usage, err = s.handleNonStreamingResponse(ctx, resp, c, account, originalModel, mappedModel, upstreamMode)
 		if err != nil {
 			return nil, err
 		}
@@ -360,7 +378,56 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	}, nil
 }
 
-func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token string, isStream bool) (*http.Request, error) {
+func resolveOpenAIUpstreamMode(account *Account) openAIUpstreamMode {
+	if account == nil || account.Type != AccountTypeApiKey {
+		return openAIUpstreamModeResponses
+	}
+	baseURL := strings.ToLower(strings.TrimSpace(account.GetOpenAIBaseURL()))
+	baseURL = strings.TrimRight(baseURL, "/")
+	if strings.HasSuffix(baseURL, "/responses") {
+		return openAIUpstreamModeResponses
+	}
+	if strings.HasSuffix(baseURL, "/chat/completions") {
+		return openAIUpstreamModeChatCompletions
+	}
+	if strings.Contains(baseURL, "token.sensenova.cn") {
+		return openAIUpstreamModeChatCompletions
+	}
+	return openAIUpstreamModeResponses
+}
+
+func resolveOpenAIUpstreamURL(account *Account, mode openAIUpstreamMode) string {
+	if account == nil || account.Type == AccountTypeOAuth {
+		return chatgptCodexURL
+	}
+
+	baseURL := strings.TrimRight(strings.TrimSpace(account.GetOpenAIBaseURL()), "/")
+	if baseURL == "" {
+		if mode == openAIUpstreamModeChatCompletions {
+			return "https://api.openai.com/v1/chat/completions"
+		}
+		return openaiPlatformAPIURL
+	}
+
+	lowerBaseURL := strings.ToLower(baseURL)
+	if strings.HasSuffix(lowerBaseURL, "/responses") || strings.HasSuffix(lowerBaseURL, "/chat/completions") {
+		return baseURL
+	}
+
+	if strings.HasSuffix(lowerBaseURL, "/v1") {
+		if mode == openAIUpstreamModeChatCompletions {
+			return baseURL + "/chat/completions"
+		}
+		return baseURL + "/responses"
+	}
+
+	if mode == openAIUpstreamModeChatCompletions {
+		return baseURL + "/v1/chat/completions"
+	}
+	return baseURL + "/v1/responses"
+}
+
+func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token string, isStream bool, upstreamMode openAIUpstreamMode) (*http.Request, error) {
 	// Determine target URL based on account type
 	var targetURL string
 	switch account.Type {
@@ -369,12 +436,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 		targetURL = chatgptCodexURL
 	case AccountTypeApiKey:
 		// API Key accounts use Platform API or custom base URL
-		baseURL := account.GetOpenAIBaseURL()
-		if baseURL != "" {
-			targetURL = baseURL + "/responses"
-		} else {
-			targetURL = openaiPlatformAPIURL
-		}
+		targetURL = resolveOpenAIUpstreamURL(account, upstreamMode)
 	default:
 		targetURL = openaiPlatformAPIURL
 	}
@@ -426,6 +488,119 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 	}
 
 	return req, nil
+}
+
+func convertResponsesRequestToChatCompletions(reqBody map[string]any) (map[string]any, error) {
+	chatBody := map[string]any{}
+
+	if model, ok := reqBody["model"].(string); ok && model != "" {
+		chatBody["model"] = model
+	}
+	if stream, ok := reqBody["stream"].(bool); ok {
+		chatBody["stream"] = stream
+	}
+	if temperature, ok := reqBody["temperature"]; ok {
+		chatBody["temperature"] = temperature
+	}
+	if topP, ok := reqBody["top_p"]; ok {
+		chatBody["top_p"] = topP
+	}
+	if maxTokens, ok := reqBody["max_output_tokens"]; ok {
+		chatBody["max_tokens"] = maxTokens
+	} else if maxTokens, ok := reqBody["max_tokens"]; ok {
+		chatBody["max_tokens"] = maxTokens
+	}
+
+	messages := make([]map[string]any, 0)
+	if instructions, ok := reqBody["instructions"].(string); ok && strings.TrimSpace(instructions) != "" {
+		messages = append(messages, map[string]any{
+			"role":    "system",
+			"content": instructions,
+		})
+	}
+
+	inputMessages, err := responsesInputToChatMessages(reqBody["input"])
+	if err != nil {
+		return nil, err
+	}
+	messages = append(messages, inputMessages...)
+	if len(messages) == 0 {
+		return nil, errors.New("input is required for chat completions upstream")
+	}
+	chatBody["messages"] = messages
+
+	return chatBody, nil
+}
+
+func responsesInputToChatMessages(input any) ([]map[string]any, error) {
+	switch v := input.(type) {
+	case string:
+		if strings.TrimSpace(v) == "" {
+			return nil, nil
+		}
+		return []map[string]any{{"role": "user", "content": v}}, nil
+	case []any:
+		messages := make([]map[string]any, 0, len(v))
+		for _, item := range v {
+			msg, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			role, _ := msg["role"].(string)
+			if role == "" {
+				role = "user"
+			}
+			content := responsesContentToChatContent(msg["content"])
+			if content == "" {
+				continue
+			}
+			messages = append(messages, map[string]any{
+				"role":    role,
+				"content": content,
+			})
+		}
+		return messages, nil
+	case []map[string]any:
+		anyItems := make([]any, 0, len(v))
+		for _, item := range v {
+			anyItems = append(anyItems, item)
+		}
+		return responsesInputToChatMessages(anyItems)
+	case nil:
+		return nil, nil
+	default:
+		return nil, fmt.Errorf("unsupported responses input type: %T", input)
+	}
+}
+
+func responsesContentToChatContent(content any) string {
+	switch v := content.(type) {
+	case string:
+		return v
+	case []any:
+		parts := make([]string, 0, len(v))
+		for _, item := range v {
+			part, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			switch part["type"] {
+			case "input_text", "output_text", "text":
+				if text, ok := part["text"].(string); ok {
+					parts = append(parts, text)
+				}
+			}
+		}
+		return strings.Join(parts, "\n")
+	case []map[string]any:
+		anyItems := make([]any, 0, len(v))
+		for _, item := range v {
+			anyItems = append(anyItems, item)
+		}
+		return responsesContentToChatContent(anyItems)
+	default:
+		return ""
+	}
 }
 
 func (s *OpenAIGatewayService) handleErrorResponse(ctx context.Context, resp *http.Response, c *gin.Context, account *Account) (*OpenAIForwardResult, error) {
@@ -488,7 +663,7 @@ type openaiStreamingResult struct {
 	firstTokenMs *int
 }
 
-func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, startTime time.Time, originalModel, mappedModel string) (*openaiStreamingResult, error) {
+func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, startTime time.Time, originalModel, mappedModel string, upstreamMode openAIUpstreamMode) (*openaiStreamingResult, error) {
 	// Set SSE response headers
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
@@ -523,6 +698,22 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 			// Replace model in response if needed
 			if needModelReplace {
 				line = s.replaceModelInSSELine(line, mappedModel, originalModel)
+			}
+			if upstreamMode == openAIUpstreamModeChatCompletions {
+				convertedLines, ok := convertChatCompletionsSSEToResponsesLines(data, mappedModel, originalModel, usage)
+				if ok {
+					for _, convertedLine := range convertedLines {
+						if _, err := fmt.Fprintf(w, "%s\n", convertedLine); err != nil {
+							return &openaiStreamingResult{usage: usage, firstTokenMs: firstTokenMs}, err
+						}
+					}
+					flusher.Flush()
+					if firstTokenMs == nil && data != "" && data != "[DONE]" && len(convertedLines) > 0 {
+						ms := int(time.Since(startTime).Milliseconds())
+						firstTokenMs = &ms
+					}
+					continue
+				}
 			}
 
 			// Forward line
@@ -592,6 +783,73 @@ func (s *OpenAIGatewayService) replaceModelInSSELine(line, fromModel, toModel st
 	return line
 }
 
+func convertChatCompletionsSSEToResponsesLines(data, mappedModel, originalModel string, usage *OpenAIUsage) ([]string, bool) {
+	if data == "" {
+		return []string{""}, true
+	}
+	if data == "[DONE]" {
+		return []string{
+			`data: {"type":"response.completed","response":{"usage":{"input_tokens":0,"output_tokens":0,"input_tokens_details":{"cached_tokens":0}}}}`,
+			"data: [DONE]",
+			"",
+		}, true
+	}
+
+	var event struct {
+		Model   string `json:"model"`
+		Choices []struct {
+			Delta struct {
+				Content string `json:"content"`
+			} `json:"delta"`
+			FinishReason any `json:"finish_reason"`
+		} `json:"choices"`
+		Usage struct {
+			PromptTokens     int `json:"prompt_tokens"`
+			CompletionTokens int `json:"completion_tokens"`
+			TotalTokens      int `json:"total_tokens"`
+		} `json:"usage"`
+	}
+	if err := json.Unmarshal([]byte(data), &event); err != nil {
+		return nil, false
+	}
+
+	if event.Usage.PromptTokens > 0 || event.Usage.CompletionTokens > 0 {
+		usage.InputTokens = event.Usage.PromptTokens
+		usage.OutputTokens = event.Usage.CompletionTokens
+	}
+
+	model := originalModel
+	if model == "" {
+		model = event.Model
+	}
+	if model == "" {
+		model = mappedModel
+	}
+
+	lines := make([]string, 0, 2)
+	for _, choice := range event.Choices {
+		if choice.Delta.Content == "" {
+			continue
+		}
+		payload := map[string]any{
+			"type":  "response.output_text.delta",
+			"delta": choice.Delta.Content,
+			"response": map[string]any{
+				"model": model,
+			},
+		}
+		b, err := json.Marshal(payload)
+		if err != nil {
+			continue
+		}
+		lines = append(lines, "data: "+string(b))
+	}
+	if len(lines) == 0 {
+		return nil, true
+	}
+	return append(lines, ""), true
+}
+
 func (s *OpenAIGatewayService) parseSSEUsage(data string, usage *OpenAIUsage) {
 	// Parse response.completed event for usage (OpenAI Responses format)
 	var event struct {
@@ -614,10 +872,24 @@ func (s *OpenAIGatewayService) parseSSEUsage(data string, usage *OpenAIUsage) {
 	}
 }
 
-func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, originalModel, mappedModel string) (*OpenAIUsage, error) {
+func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, originalModel, mappedModel string, upstreamMode openAIUpstreamMode) (*OpenAIUsage, error) {
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
+	}
+
+	if upstreamMode == openAIUpstreamModeChatCompletions {
+		convertedBody, usage, err := convertChatCompletionsResponseToResponsesBody(body, originalModel, mappedModel)
+		if err != nil {
+			return nil, err
+		}
+		for key, values := range resp.Header {
+			for _, value := range values {
+				c.Header(key, value)
+			}
+		}
+		c.Data(resp.StatusCode, "application/json", convertedBody)
+		return usage, nil
 	}
 
 	// Parse usage
@@ -655,6 +927,79 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 	c.Data(resp.StatusCode, "application/json", body)
 
 	return usage, nil
+}
+
+func convertChatCompletionsResponseToResponsesBody(body []byte, originalModel, mappedModel string) ([]byte, *OpenAIUsage, error) {
+	var chatResp struct {
+		ID      string `json:"id"`
+		Object  string `json:"object"`
+		Created int64  `json:"created"`
+		Model   string `json:"model"`
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+		Usage struct {
+			PromptTokens     int `json:"prompt_tokens"`
+			CompletionTokens int `json:"completion_tokens"`
+			TotalTokens      int `json:"total_tokens"`
+		} `json:"usage"`
+	}
+	if err := json.Unmarshal(body, &chatResp); err != nil {
+		return nil, nil, fmt.Errorf("parse chat completions response: %w", err)
+	}
+
+	text := ""
+	if len(chatResp.Choices) > 0 {
+		text = chatResp.Choices[0].Message.Content
+	}
+	model := originalModel
+	if model == "" {
+		model = chatResp.Model
+	}
+	if model == "" {
+		model = mappedModel
+	}
+
+	resp := map[string]any{
+		"id":     chatResp.ID,
+		"object": "response",
+		"model":  model,
+		"output": []map[string]any{
+			{
+				"type": "message",
+				"role": "assistant",
+				"content": []map[string]any{
+					{
+						"type": "output_text",
+						"text": text,
+					},
+				},
+			},
+		},
+		"output_text": text,
+		"usage": map[string]any{
+			"input_tokens":  chatResp.Usage.PromptTokens,
+			"output_tokens": chatResp.Usage.CompletionTokens,
+			"input_tokens_details": map[string]any{
+				"cached_tokens": 0,
+			},
+		},
+	}
+	if chatResp.Created > 0 {
+		resp["created_at"] = chatResp.Created
+	}
+
+	convertedBody, err := json.Marshal(resp)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return convertedBody, &OpenAIUsage{
+		InputTokens:  chatResp.Usage.PromptTokens,
+		OutputTokens: chatResp.Usage.CompletionTokens,
+	}, nil
 }
 
 func (s *OpenAIGatewayService) replaceModelInResponseBody(body []byte, fromModel, toModel string) []byte {

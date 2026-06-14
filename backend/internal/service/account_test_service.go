@@ -301,6 +301,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	var apiURL string
 	var isOAuth bool
 	var chatgptAccountID string
+	upstreamMode := resolveOpenAIUpstreamMode(account)
 
 	if account.IsOAuth() {
 		isOAuth = true
@@ -329,11 +330,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 			return s.sendErrorAndEnd(c, "No API key available")
 		}
 
-		baseURL := account.GetOpenAIBaseURL()
-		if baseURL == "" {
-			baseURL = "https://api.openai.com"
-		}
-		apiURL = strings.TrimSuffix(baseURL, "/") + "/responses"
+		apiURL = resolveOpenAIUpstreamURL(account, upstreamMode)
 	} else {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Unsupported account type: %s", account.Type))
 	}
@@ -347,6 +344,13 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 
 	// Create OpenAI Responses API payload
 	payload := createOpenAITestPayload(testModelID, isOAuth)
+	if upstreamMode == openAIUpstreamModeChatCompletions {
+		convertedPayload, err := convertResponsesRequestToChatCompletions(payload)
+		if err != nil {
+			return s.sendErrorAndEnd(c, "Failed to create test payload")
+		}
+		payload = convertedPayload
+	}
 	payloadBytes, _ := json.Marshal(payload)
 
 	// Send test_start event
@@ -390,7 +394,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	}
 
 	// Process SSE stream
-	return s.processOpenAIStream(c, resp.Body)
+	return s.processOpenAIStream(c, resp.Body, upstreamMode)
 }
 
 // testGeminiAccountConnection tests a Gemini account's connection
@@ -767,8 +771,8 @@ func (s *AccountTestService) processClaudeStream(c *gin.Context, body io.Reader)
 	}
 }
 
-// processOpenAIStream processes the SSE stream from OpenAI Responses API
-func (s *AccountTestService) processOpenAIStream(c *gin.Context, body io.Reader) error {
+// processOpenAIStream processes the SSE stream from OpenAI Responses or Chat Completions API.
+func (s *AccountTestService) processOpenAIStream(c *gin.Context, body io.Reader, upstreamMode openAIUpstreamMode) error {
 	reader := bufio.NewReader(body)
 
 	for {
@@ -790,6 +794,36 @@ func (s *AccountTestService) processOpenAIStream(c *gin.Context, body io.Reader)
 		if jsonStr == "[DONE]" {
 			s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
 			return nil
+		}
+
+		if upstreamMode == openAIUpstreamModeChatCompletions {
+			var data struct {
+				Choices []struct {
+					Delta struct {
+						Content string `json:"content"`
+					} `json:"delta"`
+					FinishReason any `json:"finish_reason"`
+				} `json:"choices"`
+				Error *struct {
+					Message string `json:"message"`
+				} `json:"error"`
+			}
+			if err := json.Unmarshal([]byte(jsonStr), &data); err != nil {
+				continue
+			}
+			if data.Error != nil {
+				return s.sendErrorAndEnd(c, data.Error.Message)
+			}
+			for _, choice := range data.Choices {
+				if choice.Delta.Content != "" {
+					s.sendEvent(c, TestEvent{Type: "content", Text: choice.Delta.Content})
+				}
+				if choice.FinishReason != nil {
+					s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
+					return nil
+				}
+			}
+			continue
 		}
 
 		var data map[string]any
