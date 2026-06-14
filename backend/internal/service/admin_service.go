@@ -612,12 +612,13 @@ func (s *adminServiceImpl) GetAccount(ctx context.Context, id int64) (*Account, 
 }
 
 func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccountInput) (*Account, error) {
+	extra := normalizeAccountAuthHeader(input.Platform, input.Type, input.Extra)
 	account := &Account{
 		Name:        input.Name,
 		Platform:    input.Platform,
 		Type:        input.Type,
 		Credentials: input.Credentials,
-		Extra:       input.Extra,
+		Extra:       extra,
 		ProxyID:     input.ProxyID,
 		Concurrency: input.Concurrency,
 		Priority:    input.Priority,
@@ -668,8 +669,8 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	if len(input.Credentials) > 0 {
 		account.Credentials = input.Credentials
 	}
-	if len(input.Extra) > 0 {
-		account.Extra = input.Extra
+	if input.Extra != nil {
+		account.Extra = normalizeAccountAuthHeader(account.Platform, account.Type, input.Extra)
 	}
 	if input.ProxyID != nil {
 		account.ProxyID = input.ProxyID

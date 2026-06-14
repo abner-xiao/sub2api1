@@ -133,7 +133,7 @@ func (s *groupRepoStub) ListActive(ctx context.Context) ([]Group, error) {
 }
 
 func (s *groupRepoStub) ListActiveByPlatform(ctx context.Context, platform string) ([]Group, error) {
-	panic("unexpected ListActiveByPlatform call")
+	return nil, nil
 }
 
 func (s *groupRepoStub) ExistsByName(ctx context.Context, name string) (bool, error) {

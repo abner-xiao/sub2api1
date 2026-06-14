@@ -1080,6 +1080,7 @@ export default {
       apiKeyHint: '您的 Claude Console API Key',
       bearerToken: 'Bearer Token',
       bearerTokenDesc: '勾选后使用 Authorization: Bearer 传递 API Key；不勾选则保持 x-api-key。',
+      openaiBearerTokenDesc: 'OpenAI API Key 固定使用 Authorization: Bearer 传递。',
       // OpenAI specific hints
       openai: {
         baseUrlHint: '留空使用官方 OpenAI API',

@@ -70,6 +70,26 @@
           </span>
         </label>
 
+        <label
+          v-if="account.platform === 'openai'"
+          class="flex cursor-pointer items-start gap-3 rounded-lg border border-gray-200 p-3 transition-colors hover:bg-gray-50 dark:border-dark-600 dark:hover:bg-dark-700"
+        >
+          <input
+            checked
+            disabled
+            type="checkbox"
+            class="mt-0.5 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500"
+          />
+          <span>
+            <span class="block text-sm font-medium text-gray-900 dark:text-white">
+              {{ t('admin.accounts.bearerToken') }}
+            </span>
+            <span class="block text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.openaiBearerTokenDesc') }}
+            </span>
+          </span>
+        </label>
+
         <!-- Model Restriction Section (不适用于 Gemini) -->
         <div v-if="account.platform !== 'gemini'" class="border-t border-gray-200 pt-4 dark:border-dark-600">
           <label class="input-label">{{ t('admin.accounts.modelRestriction') }}</label>

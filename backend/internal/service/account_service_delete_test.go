@@ -28,16 +28,26 @@ type accountRepoStub struct {
 	existsErr  error   // ExistsByID 的错误返回值
 	deleteErr  error   // Delete 的错误返回值
 	deletedIDs []int64 // 记录已删除的账号 ID 列表
+	account    *Account
+	created    []*Account
+	updated    []*Account
 }
 
 // 以下方法在本测试中不应被调用，使用 panic 确保测试失败时能快速定位问题
 
 func (s *accountRepoStub) Create(ctx context.Context, account *Account) error {
-	panic("unexpected Create call")
+	s.created = append(s.created, account)
+	if account.ID == 0 {
+		account.ID = int64(len(s.created))
+	}
+	return nil
 }
 
 func (s *accountRepoStub) GetByID(ctx context.Context, id int64) (*Account, error) {
-	panic("unexpected GetByID call")
+	if s.account == nil {
+		return nil, ErrAccountNotFound
+	}
+	return s.account, nil
 }
 
 // ExistsByID 返回预设的存在性检查结果。
@@ -51,7 +61,9 @@ func (s *accountRepoStub) GetByCRSAccountID(ctx context.Context, crsAccountID st
 }
 
 func (s *accountRepoStub) Update(ctx context.Context, account *Account) error {
-	panic("unexpected Update call")
+	s.updated = append(s.updated, account)
+	s.account = account
+	return nil
 }
 
 // Delete 记录被删除的账号 ID 并返回预设的错误。
