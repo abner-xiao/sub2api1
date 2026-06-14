@@ -930,7 +930,7 @@ export default {
       apiKeyHint: 'Your Claude Console API Key',
       bearerToken: 'Bearer Token',
       bearerTokenDesc: 'When checked, pass the API key as Authorization: Bearer. Otherwise keep x-api-key.',
-      openaiBearerTokenDesc: 'OpenAI API keys are always sent as Authorization: Bearer.',
+      openaiBearerTokenDesc: 'When checked, pass the API key as Authorization: Bearer. Otherwise keep the previous API-key headers.',
       // OpenAI specific hints
       openai: {
         baseUrlHint: 'Leave default for official OpenAI API',

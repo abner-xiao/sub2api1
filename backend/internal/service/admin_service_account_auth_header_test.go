@@ -32,7 +32,7 @@ func TestAdminService_CreateAccount_NormalizesAnthropicBearerToken(t *testing.T)
 	require.Equal(t, "bearer", accountRepo.created[0].Extra["auth_header"])
 }
 
-func TestAdminService_CreateAccount_LeavesOpenAIBearerTokenGeneric(t *testing.T) {
+func TestAdminService_CreateAccount_NormalizesOpenAIBearerToken(t *testing.T) {
 	accountRepo := &accountRepoStub{}
 	svc := &adminServiceImpl{accountRepo: accountRepo, groupRepo: &groupRepoStub{}}
 
@@ -51,6 +51,7 @@ func TestAdminService_CreateAccount_LeavesOpenAIBearerTokenGeneric(t *testing.T)
 	require.NoError(t, err)
 	require.NotNil(t, account)
 	require.Len(t, accountRepo.created, 1)
+	require.Equal(t, "bearer", accountRepo.created[0].Extra["openai_auth_header"])
 	require.Equal(t, "bearer", accountRepo.created[0].Extra["auth_header"])
 	require.NotContains(t, accountRepo.created[0].Extra, "anthropic_auth_header")
 }
@@ -64,6 +65,30 @@ func TestAdminService_UpdateAccount_AllowsClearingAnthropicBearerToken(t *testin
 			Type:     AccountTypeApiKey,
 			Extra: map[string]any{
 				"anthropic_auth_header": "bearer",
+			},
+		},
+	}
+	svc := &adminServiceImpl{accountRepo: accountRepo, groupRepo: &groupRepoStub{}}
+
+	account, err := svc.UpdateAccount(context.Background(), 12, &UpdateAccountInput{
+		Extra: map[string]any{},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, account)
+	require.Len(t, accountRepo.updated, 1)
+	require.Empty(t, accountRepo.updated[0].Extra)
+}
+
+func TestAdminService_UpdateAccount_AllowsClearingOpenAIBearerToken(t *testing.T) {
+	accountRepo := &accountRepoStub{
+		account: &Account{
+			ID:       12,
+			Name:     "openai bearer",
+			Platform: PlatformOpenAI,
+			Type:     AccountTypeApiKey,
+			Extra: map[string]any{
+				"openai_auth_header": "bearer",
 			},
 		},
 	}

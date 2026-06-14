@@ -384,11 +384,9 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 		return nil, err
 	}
 
-	// Set authentication header
-	req.Header.Set("authorization", "Bearer "+token)
-
 	// Set headers specific to OAuth accounts (ChatGPT internal API)
 	if account.Type == AccountTypeOAuth {
+		req.Header.Set("authorization", "Bearer "+token)
 		// Required: set Host for ChatGPT API (must use req.Host, not Header.Set)
 		req.Host = "chatgpt.com"
 		// Required: set chatgpt-account-id header
@@ -402,6 +400,8 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 		} else {
 			req.Header.Set("accept", "application/json")
 		}
+	} else {
+		setOpenAIAPIKeyAuthHeader(req.Header, account, token)
 	}
 
 	// Whitelist passthrough headers

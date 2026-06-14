@@ -359,15 +359,17 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 
 	// Set common headers
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+authToken)
 
 	// Set OAuth-specific headers for ChatGPT internal API
 	if isOAuth {
+		req.Header.Set("Authorization", "Bearer "+authToken)
 		req.Host = "chatgpt.com"
 		req.Header.Set("accept", "text/event-stream")
 		if chatgptAccountID != "" {
 			req.Header.Set("chatgpt-account-id", chatgptAccountID)
 		}
+	} else {
+		setOpenAIAPIKeyAuthHeader(req.Header, account, authToken)
 	}
 
 	// Get proxy URL

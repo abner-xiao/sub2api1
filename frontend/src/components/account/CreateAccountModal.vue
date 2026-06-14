@@ -257,7 +257,7 @@
           class="mt-3 flex cursor-pointer items-start gap-3 rounded-lg border border-gray-200 p-3 transition-colors hover:bg-gray-50 dark:border-dark-600 dark:hover:bg-dark-700"
         >
           <input
-            v-model="anthropicBearerTokenEnabled"
+            v-model="bearerTokenEnabled"
             type="checkbox"
             class="mt-0.5 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500"
           />
@@ -357,8 +357,7 @@
           class="mt-3 flex cursor-pointer items-start gap-3 rounded-lg border border-gray-200 p-3 transition-colors hover:bg-gray-50 dark:border-dark-600 dark:hover:bg-dark-700"
         >
           <input
-            checked
-            disabled
+            v-model="bearerTokenEnabled"
             type="checkbox"
             class="mt-0.5 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500"
           />
@@ -1335,7 +1334,7 @@ const customErrorCodesEnabled = ref(false)
 const selectedErrorCodes = ref<number[]>([])
 const customErrorCodeInput = ref<number | null>(null)
 const interceptWarmupRequests = ref(false)
-const anthropicBearerTokenEnabled = ref(false)
+const bearerTokenEnabled = ref(false)
 const mixedScheduling = ref(false) // For antigravity accounts: enable mixed scheduling
 const geminiOAuthType = ref<'code_assist' | 'ai_studio'>('code_assist')
 const geminiAIStudioOAuthEnabled = ref(false)
@@ -1583,11 +1582,11 @@ watch(
     // Clear model-related settings
     allowedModels.value = []
     modelMappings.value = []
-    // Reset Anthropic-specific settings when switching to other platforms
+    // Reset settings that do not apply to the selected platform.
     if (newPlatform !== 'anthropic') {
       interceptWarmupRequests.value = false
-      anthropicBearerTokenEnabled.value = false
     }
+    bearerTokenEnabled.value = false
     // Antigravity only supports OAuth
     if (newPlatform === 'antigravity') {
       accountCategory.value = 'oauth-based'
@@ -1722,7 +1721,7 @@ const resetForm = () => {
   selectedErrorCodes.value = []
   customErrorCodeInput.value = null
   interceptWarmupRequests.value = false
-  anthropicBearerTokenEnabled.value = false
+  bearerTokenEnabled.value = false
   geminiOAuthType.value = 'code_assist'
   oauth.resetState()
   openaiOAuth.resetState()
@@ -1784,10 +1783,16 @@ const handleSubmit = async () => {
   }
 
   form.credentials = credentials
-  form.extra =
-    form.platform === 'anthropic' && anthropicBearerTokenEnabled.value
-      ? { anthropic_auth_header: 'bearer' }
-      : undefined
+  if (bearerTokenEnabled.value) {
+    form.extra =
+      form.platform === 'openai'
+        ? { openai_auth_header: 'bearer' }
+        : form.platform === 'anthropic'
+          ? { anthropic_auth_header: 'bearer' }
+          : undefined
+  } else {
+    form.extra = undefined
+  }
 
   submitting.value = true
   try {

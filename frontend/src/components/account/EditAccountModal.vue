@@ -56,7 +56,7 @@
           class="flex cursor-pointer items-start gap-3 rounded-lg border border-gray-200 p-3 transition-colors hover:bg-gray-50 dark:border-dark-600 dark:hover:bg-dark-700"
         >
           <input
-            v-model="anthropicBearerTokenEnabled"
+            v-model="bearerTokenEnabled"
             type="checkbox"
             class="mt-0.5 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500"
           />
@@ -75,8 +75,7 @@
           class="flex cursor-pointer items-start gap-3 rounded-lg border border-gray-200 p-3 transition-colors hover:bg-gray-50 dark:border-dark-600 dark:hover:bg-dark-700"
         >
           <input
-            checked
-            disabled
+            v-model="bearerTokenEnabled"
             type="checkbox"
             class="mt-0.5 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500"
           />
@@ -647,7 +646,7 @@ const customErrorCodesEnabled = ref(false)
 const selectedErrorCodes = ref<number[]>([])
 const customErrorCodeInput = ref<number | null>(null)
 const interceptWarmupRequests = ref(false)
-const anthropicBearerTokenEnabled = ref(false)
+const bearerTokenEnabled = ref(false)
 const mixedScheduling = ref(false) // For antigravity accounts: enable mixed scheduling
 
 // Common models for whitelist - Anthropic
@@ -863,10 +862,14 @@ watch(
       // Load mixed scheduling setting (only for antigravity accounts)
       const extra = newAccount.extra as Record<string, unknown> | undefined
       mixedScheduling.value = extra?.mixed_scheduling === true
-      anthropicBearerTokenEnabled.value =
-        newAccount.platform === 'anthropic' &&
-        newAccount.type === 'apikey' &&
-        extra?.anthropic_auth_header === 'bearer'
+      bearerTokenEnabled.value = false
+      if (newAccount.type === 'apikey') {
+        if (newAccount.platform === 'anthropic') {
+          bearerTokenEnabled.value = extra?.anthropic_auth_header === 'bearer'
+        } else if (newAccount.platform === 'openai') {
+          bearerTokenEnabled.value = extra?.openai_auth_header === 'bearer'
+        }
+      }
 
       // Initialize API Key fields for apikey type
       if (newAccount.type === 'apikey' && newAccount.credentials) {
@@ -1085,13 +1088,18 @@ const handleSubmit = async () => {
       updatePayload.extra = newExtra
     }
 
-    if (props.account.platform === 'anthropic' && props.account.type === 'apikey') {
+    if (
+      (props.account.platform === 'anthropic' || props.account.platform === 'openai') &&
+      props.account.type === 'apikey'
+    ) {
       const currentExtra = (props.account.extra as Record<string, unknown>) || {}
       const newExtra: Record<string, unknown> = { ...currentExtra }
-      if (anthropicBearerTokenEnabled.value) {
-        newExtra.anthropic_auth_header = 'bearer'
+      const authHeaderKey =
+        props.account.platform === 'openai' ? 'openai_auth_header' : 'anthropic_auth_header'
+      if (bearerTokenEnabled.value) {
+        newExtra[authHeaderKey] = 'bearer'
       } else {
-        delete newExtra.anthropic_auth_header
+        delete newExtra[authHeaderKey]
       }
       updatePayload.extra = newExtra
     }
